@@ -4,7 +4,11 @@ function curl --description 'curl with a per-request timing line (wirestat)'
         return $status
     end
 
-    set -l err (mktemp "$TMPDIR/wirestat.XXXXXX"; or mktemp /tmp/wirestat.XXXXXX)
+    # TMPDIR is unset on plenty of Linux containers; without a default this
+    # resolves to /wirestat.XXXXXX and mktemp fails noisily onto stderr.
+    set -l tmpdir /tmp
+    test -n "$TMPDIR"; and set tmpdir (string trim --right --chars=/ -- $TMPDIR)
+    set -l err (mktemp "$tmpdir/wirestat.XXXXXX" 2>/dev/null)
     if test -z "$err"
         command curl $argv
         return $status

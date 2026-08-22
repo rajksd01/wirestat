@@ -29,20 +29,29 @@ assert_match() {
 TMP=$(mktemp -d)
 trap 'kill "$SRV" 2>/dev/null; wait "$SRV" 2>/dev/null; rm -rf "$TMP"' EXIT
 
-printf 'hello wirestat\n' > "$TMP/body.txt"
-( cd "$TMP" && exec python3 -u -m http.server 0 --bind 127.0.0.1 ) > "$TMP/srv.log" 2>&1 &
+command -v python3 >/dev/null 2>&1 || {
+  echo "python3 is required to run the integration tests"; exit 1
+}
+
+python3 "$ROOT/test/server.py" > "$TMP/srv.log" 2>&1 &
 SRV=$!
 set +m 2>/dev/null || true
 
 PORT=""
 i=0
-while [ "$i" -lt 100 ]; do
-  PORT=$(sed -n 's/.*port \([0-9][0-9]*\).*/\1/p' "$TMP/srv.log" | head -1)
+while [ "$i" -lt 300 ]; do
+  PORT=$(sed -n 's/^PORT=\([0-9][0-9]*\)$/\1/p' "$TMP/srv.log" | head -1)
   [ -n "$PORT" ] && break
+  kill -0 "$SRV" 2>/dev/null || break
   i=$((i + 1)); sleep 0.1
 done
-[ -n "$PORT" ] || { echo "could not start test server"; exit 1; }
+if [ -z "$PORT" ]; then
+  echo "could not start test server; server output was:"
+  sed 's/^/  | /' "$TMP/srv.log"
+  exit 1
+fi
 URL="http://127.0.0.1:$PORT/body.txt"
+REDIR_URL="http://127.0.0.1:$PORT/r"
 
 # run <shell> <script> -> runs script with wirestat.sh sourced
 run() {
@@ -78,6 +87,15 @@ for SHELL_UNDER_TEST in bash zsh; do
   assert_eq "$SHELL_UNDER_TEST: one stats line per transfer for a multi-URL call" \
     "2" \
     "$(run "$SHELL_UNDER_TEST" "WIRESTAT_FORCE=1 curl -s -o /dev/null -o /dev/null '$URL' '$URL'" 2>&1 >/dev/null | wc -l | tr -d ' ')"
+
+  assert_match "$SHELL_UNDER_TEST: a followed redirect reports a redir segment" \
+    "redir " \
+    "$(run "$SHELL_UNDER_TEST" "WIRESTAT_FORCE=1 curl -sL -o /dev/null '$REDIR_URL'" 2>&1 >/dev/null)"
+
+  assert_eq "$SHELL_UNDER_TEST: works with TMPDIR unset (bare Linux containers)" \
+    "1" \
+    "$(env -u TMPDIR "$SHELL_UNDER_TEST" -c ". '$ROOT/wirestat.sh'
+WIRESTAT_FORCE=1 curl -s '$URL'" 2>&1 >/dev/null | wc -l | tr -d ' ')"
 
   assert_eq "$SHELL_UNDER_TEST: an unsupported curl disables the wrapper" \
     "" \
@@ -124,6 +142,17 @@ $1"
   assert_eq "fish: one stats line per transfer for a multi-URL call" \
     "2" \
     "$(fishrun "WIRESTAT_FORCE=1 curl -s -o /dev/null -o /dev/null '$URL' '$URL'" 2>&1 >/dev/null | wc -l | tr -d ' ')"
+
+  assert_match "fish: a followed redirect reports a redir segment" \
+    "redir " \
+    "$(fishrun "WIRESTAT_FORCE=1 curl -sL -o /dev/null '$REDIR_URL'" 2>&1 >/dev/null)"
+
+  assert_eq "fish: works with TMPDIR unset (bare Linux containers)" \
+    "1" \
+    "$(env -u TMPDIR fish -c "set -gx WIRESTAT_HOME '$ROOT'
+source '$ROOT/conf.d/wirestat.fish'
+source '$ROOT/functions/curl.fish'
+WIRESTAT_FORCE=1 curl -s '$URL'" 2>&1 >/dev/null | wc -l | tr -d ' ')"
 
   assert_eq "fish: an unsupported curl disables the wrapper" \
     "" \

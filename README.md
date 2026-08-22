@@ -3,22 +3,11 @@
 One dim line of HTTP timing after every `curl` you run. No flags, no wrapper
 command, no dashboard.
 
-```
-$ curl -s -o /dev/null https://example.com
-200  h2   new   dns 24  tcp 8  tls 15  srv 13  dl 0   60ms  559B
-
-$ curl -s -o /dev/null -o /dev/null https://example.com https://example.com
-200  h2   new   dns 2  tcp 8  tls 13  srv 18  dl 0   41ms  559B
-200  h2   reuse dns 0  tcp 0  tls 0  srv 10  dl 3   13ms  559B
-
-$ curl -sL -o /dev/null http://github.com
-200  h2   new   dns 13  tcp 65  tls 0  srv 151  dl 69  redir 0   298ms  561.1KB
-
-$ curl -s -o /dev/null https://nope.invalid
-err  curl: (6) Could not resolve host: nope.invalid
-```
+<img src="docs/demo.svg" alt="wirestat output in a terminal" width="100%">
 
 ## Reading a line
+
+<img src="docs/anatomy.svg" alt="anatomy of a wirestat line" width="100%">
 
 | Field | Meaning |
 |---|---|
@@ -36,6 +25,36 @@ err  curl: (6) Could not resolve host: nope.invalid
 
 The split that matters most is `dns + tcp + tls` versus `srv`: network versus
 your server. It tells you whose problem it is before you open a dashboard.
+
+## What it's for
+
+**Telling "the API is slow" apart from "the network is slow."** A 400ms call
+where `srv` is 30ms is not a backend problem, and no amount of profiling your
+handler will help. The reverse is just as common.
+
+**Catching the benchmark that lies to you.** Every `curl` you type opens a
+fresh connection, so you are timing DNS + TCP + TLS that your connection-pooled
+production client never pays. When a line says `new` and the first three
+phases are 90ms, you now know your loop test is measuring the wrong thing.
+
+**Noticing the protocol quietly downgraded.** A service that reports `h2` in
+staging and `1.1` in production is usually a load balancer, not your client —
+and you would otherwise never look.
+
+**Finding the redirect you forgot you had.** An `http://` base URL in a config
+file 301s to `https://`, paying a whole extra connection and handshake on every
+call. `redir` makes it visible the first time you hit the endpoint.
+
+**Spotting TLS that never resumes.** A full handshake in `tls` on every single
+request, instead of a near-zero resumed one, means session tickets are
+misconfigured somewhere in the chain.
+
+**Reading a failing request without re-running it with `-v`.** `err  curl: (6)`
+tells you it was DNS, not a timeout, not a bad cert — on the first try.
+
+**Sanity-checking a payload.** `dl` next to the byte count answers "is this
+slow because it is big, or slow because it is far away", and an uncompressed
+response tends to announce itself.
 
 ## Install
 
@@ -101,6 +120,12 @@ single awk renderer. All three shells share that one renderer.
 
 curl's timing variables are more subtle than they look — see
 [docs/timing-model.md](docs/timing-model.md).
+
+## Regenerating the images
+
+```sh
+python3 docs/render-demo.py
+```
 
 ## Tests
 
