@@ -1,5 +1,7 @@
 # wirestat
 
+[![tests](https://github.com/rajksd01/wirestat/actions/workflows/ci.yml/badge.svg)](https://github.com/rajksd01/wirestat/actions/workflows/ci.yml)
+
 One dim line of HTTP timing after every `curl` you run. No flags, no wrapper
 command, no dashboard.
 
